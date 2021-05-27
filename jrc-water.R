@@ -1,13 +1,15 @@
 # other water data sources
 library(raster)
+library(stars)
+
 ##  JRC Globacl Surface Water
 jrc_base_url <- "https://storage.googleapis.com/global-surface-water/downloads2020/occurrence"
-barc_jrc <- "occurrence_90W_30Nv1_3_2020.tif"
+# barc_jrc <- "occurrence_90W_30Nv1_3_2020.tif"
+my_jrc <- "occurrence_110W_50Nv1_3_2020.tif"
 
-glue('{jrc_base_url}/{barc_jrc}') %>%
-  download.file(destfile = glue('data/JRC/{barc_jrc}'))
+glue('{jrc_base_url}/{my_jrc}') %>%
+  download.file(destfile = glue('data/JRC/{my_jrc}'))
 
-library(stars)
 barc_jrc_path <- glue('data/JRC/{barc_jrc}')
 my_jrc <- stars::read_stars(barc_jrc_path, RAT = 'VALUE')
 
