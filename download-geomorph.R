@@ -13,6 +13,9 @@ download_myfiles('PRLA', 'data/geomorph', 'DP4.00132.001')
 download_myfiles('LIRO', 'data/geomorph', 'DP4.00132.001')
 download_myfiles('BLWA', 'data/geomorph', 'DP4.00132.001')
 
+# stream.... 
+download_myfiles('ARIK', 'data/geomorph', 'DP4.00131.001')
+
 ##### download and unzip actual spatial data from urls ####
 
 s3locs <- 'data/geomorph' %>%
