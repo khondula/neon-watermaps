@@ -1,0 +1,149 @@
+---
+title: "USGS gages"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# USGS Gages in AOP boxes
+
+```{r}
+library(dataRetrieval)
+library(tidyverse)
+library(glue)
+library(sf)
+library(rosm)
+library(ggrepel)
+library(RStoolbox)
+library(scales)
+```
+
+```{r}
+shp_dir <- '~/Box/data/NEON/spatial'
+fboxes <- st_read(glue('{shp_dir}/aop_boxes/AOP_Flightboxes_2020/AOP_flightboxesAllSites.shp'))
+```
+
+```{r}
+# my_aop_site <- 'DELA'
+# # my_aq_site <- 'CARI'
+# fbox_siteid <- my_aop_site
+# my_fbox <- dplyr::filter(fboxes, siteID == fbox_siteid)
+# 
+# ggplot() + geom_sf(data = my_fbox)
+```
+
+## Query NWIS based on area
+
+parameter codes: 
+
+* Discharge = 00060
+
+```{r}
+aop_ids <- fboxes$flightbxID
+# aop_id <- 'D15_REDB_A1_P1_v1'
+aop_id <- aop_ids[15]
+
+find_usgs_sites <- function(aop_id, savemap = TRUE){
+  
+  my_fbox <- dplyr::filter(fboxes, flightbxID == aop_id)
+  my_bbox <- my_fbox %>% 
+    st_buffer(dist = 1e3) %>%
+    st_bbox() %>% 
+    as.numeric() %>% round(digits = 2)
+  # look for usgs sites with discharge within bbox
+  # use error handling to return null if no sites returned
+  usgs_sites <- tryCatch({
+    dataRetrieval::whatNWISsites(parameterCd = "00060", bBox = my_bbox)},
+    error = function(e) {return(NULL)})
+  
+  if(!is.null(usgs_sites)){
+    message(glue('{nrow(usgs_sites)} gage located around {aop_id}'))}
+  
+  # only proceed if there are gauges
+  if(!is.null(usgs_sites)){
+  # get info about sites
+  usgs_sites_info <- readNWISsite(usgs_sites[["site_no"]]) %>%
+    dplyr::select(site_no, state_cd, huc_cd, drain_area_va)
+  # get info about record length
+  site_data <- whatNWISdata(siteNumber = usgs_sites[["site_no"]]) %>%
+    arrange(begin_date) %>%
+    mutate(count_10obs = count_nu > 10) %>%
+    dplyr::filter(count_10obs) %>%
+    dplyr::filter(end_date > as.Date('2000-01-01'))
+  
+   if(nrow(site_data) > 0){
+    
+    sites_sf <- site_data %>% 
+      dplyr::select(site_no, dec_lat_va, dec_long_va) %>% 
+      distinct() %>%
+      st_as_sf(coords = c("dec_long_va", "dec_lat_va"), crs = 4326)
+  
+  # make a table with site info of interest and add city name and pop
+    df <- site_data %>%
+      dplyr::select(agency_cd, site_no, station_nm, dec_lat_va, dec_long_va,
+                  huc_cd, data_type_cd, parm_cd, stat_cd, begin_date, end_date,
+                  count_nu) %>%
+    # mutate(site_no = as.character(site_no)) %>%
+      arrange(site_no) %>%
+      left_join(usgs_sites_info) %>%
+      dplyr::mutate(flightboxID = aop_id)
+  
+  write_csv(df, file = glue('results/usgs-gages/{aop_id}.csv'))
+  # return(usgs_sites)
+   if(savemap){
+    my_fbox_buff <- my_fbox %>% st_buffer(dist = 1e3)
+    myextent <- sp::bbox(as(my_fbox_buff, "Spatial"))
+    osm1 <- osm.raster(myextent)
+    my_fbox_prj <- sf::st_transform(my_fbox, 3857)
+    my_fbox_buff_prj <- sf::st_transform(my_fbox_buff, 3857)
+    sites_prj <- sf::st_transform(sites_sf, 3857)
+    sites_prj$lat <- st_coordinates(sites_prj) %>% 
+      as.data.frame() %>% pull(Y)
+    sites_prj$lon <- st_coordinates(sites_prj) %>% 
+      as.data.frame() %>% pull(X)
+    m1 <- ggRGB(osm1, ggObj = TRUE, r = 1, g = 2, b = 3)
+    m2 <- m1 +
+      geom_sf(data = my_fbox_buff_prj, 
+              color = 'purple', alpha = 0, lty = 2) +
+      geom_sf(data = my_fbox_prj, 
+              color = "purple",
+              fill = "purple", 
+              alpha = 0.05) +
+      geom_sf(data = sites_prj, fill = 'blue', pch = 21, size = 3) +
+      ggrepel::geom_text_repel(
+        data = sites_prj,
+        aes(x = lon, y = lat, label = glue("{site_no}")),
+        nudge_y = 0.1
+      ) +
+      theme_minimal() +
+      ggtitle(glue::glue("{aop_id}")) +
+      xlab(element_blank()) +
+      ylab(element_blank())
+   
+    map_dir <- glue::glue("figs/usgs-gages")
+    if(!fs::dir_exists(map_dir)){fs::dir_create(map_dir)}
+      mapfile <- glue::glue("{map_dir}/gages-{aop_id}.pdf")
+      pdf(mapfile, height = 10, width = 8)
+      print(m2)
+      dev.off()
+   }
+   }
+  }
+}
+
+find_usgs_sites('D01_BART_R1_P1_v1')
+find_usgs_sites('D15_REDB_A1_P1_v1')
+
+usgs_df <- purrr::map(aop_ids[-99], ~find_usgs_sites(.x, savemap = TRUE))
+```
+
+```{r}
+usgs_df <- fs::dir_ls('results/usgs-gages') %>% 
+  purrr::map_df(~read_csv(.x, col_types = 'cccddccccDDdcdc'))
+```
+
+
